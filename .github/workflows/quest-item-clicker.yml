@@ -1,0 +1,68 @@
+name: Quest Item Clicker - test build
+
+on:
+  push:
+    paths:
+      - 'QuestItemClicker/**'
+      - '.github/workflows/quest-item-clicker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Download Dalamud development assemblies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'dalamud.zip'
+          $homeDir = Join-Path $env:APPDATA 'XIVLauncher/addon/Hooks/dev'
+          New-Item -ItemType Directory -Force -Path $homeDir | Out-Null
+          Invoke-WebRequest -Uri 'https://goatcorp.github.io/dalamud-distrib/latest.zip' -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $homeDir -Force
+          if (-not (Test-Path (Join-Path $homeDir 'Dalamud.dll'))) { throw 'Dalamud.dll missing from distribution.' }
+          "DALAMUD_HOME=$homeDir" >> $env:GITHUB_ENV
+      - name: Compile Release
+        shell: pwsh
+        run: |
+          dotnet build QuestItemClicker/QuestItemClicker.csproj -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify and stage packaged plugin
+        id: pack
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $packages = @(Get-ChildItem QuestItemClicker/bin/Release -Filter latest.zip -File -Recurse)
+          if ($packages.Count -ne 1) { throw "Expected one latest.zip, got $($packages.Count)." }
+          $stage = New-Item -ItemType Directory -Force -Path artifacts
+          Copy-Item $packages[0].FullName (Join-Path $stage.FullName 'latest.zip')
+          $check = Join-Path $env:RUNNER_TEMP 'qic-package-check'
+          Expand-Archive $packages[0].FullName -DestinationPath $check -Force
+          $dll = Join-Path $check 'QuestItemClicker.dll'
+          $manifest = Join-Path $check 'QuestItemClicker.json'
+          if (!(Test-Path $dll) -or !(Test-Path $manifest)) { throw 'Missing plugin DLL or root manifest in latest.zip.' }
+          $info = Get-Content $manifest -Raw | ConvertFrom-Json
+          if ($info.InternalName -ne 'QuestItemClicker' -or $info.DalamudApiLevel -ne 15) { throw 'Unexpected plugin name or API level.' }
+          $version = [System.Reflection.AssemblyName]::GetAssemblyName($dll).Version.ToString()
+          if ($info.AssemblyVersion -ne $version -or $version -notmatch '^\d+(\.\d+){3}$') { throw 'Manifest and DLL version mismatch.' }
+          Copy-Item $manifest (Join-Path $stage.FullName 'QuestItemClicker.json')
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Upload test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuestItemClicker-test-${{ steps.pack.outputs.version }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
