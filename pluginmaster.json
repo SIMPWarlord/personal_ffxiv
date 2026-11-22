@@ -1,1 +1,29 @@
-[]
+[
+  {
+    "Author": "SIMPWarlord",
+    "Name": "Quest Item Clicker",
+    "InternalName": "QuestItemClicker",
+    "AssemblyVersion": "0.1.0.0",
+    "Description": "Use the right quest item when manually selecting a known quest objective.",
+    "ApplicableVersion": "any",
+    "RepoUrl": "https://github.com/SIMPWarlord/personal_ffxiv",
+    "Tags": [
+      "quest",
+      "utility"
+    ],
+    "DalamudApiLevel": 15,
+    "LoadRequiredState": 0,
+    "LoadSync": false,
+    "CanUnloadAsync": false,
+    "LoadPriority": 0,
+    "Punchline": "Experimental quest item helper; starts in dry-run mode.",
+    "Changelog": "Initial experimental prototype. Import route data before testing.",
+    "AcceptsFeedback": true,
+    "IsHide": false,
+    "IsTestingExclusive": false,
+    "DownloadLinkInstall": "https://github.com/SIMPWarlord/personal_ffxiv/releases/download/QuestItemClicker-v0.1.0.0/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/SIMPWarlord/personal_ffxiv/releases/download/QuestItemClicker-v0.1.0.0/latest.zip",
+    "DownloadLinkTesting": "https://github.com/SIMPWarlord/personal_ffxiv/releases/download/QuestItemClicker-v0.1.0.0/latest.zip",
+    "LastUpdate": "1795310198"
+  }
+]
