@@ -256,16 +256,26 @@ public sealed class Plugin : IDalamudPlugin
     private unsafe bool TryNativeObjective(IGameObject target)
     {
         var hints = NativeQuestInspector.Inspect(target, inventory);
-        // First try the event handler's own item ID. When it is zero, use the
-        // item shortcut data already attached to this quest in the Duty List.
-        // Neither source proves the item is valid on this specific objective.
+        // Candidate sources, in order of confidence:
+        // 1. Event handler explicit item ID
+        // 2. Tracked Duty List quest-item shortcut
+        // 3. Item.EventId associated with exactly one accepted quest handler.
+        // The third case is a HEURISTIC: it does not prove target compatibility.
+        var acceptedQuestIds = hints.Where(h => h.Accepted)
+            .Select(h => h.QuestId).Distinct().ToArray();
         var direct = hints.Where(h => h.Accepted && h.Owned && h.EventItemId != 0)
             .Select(h => h.EventItemId).Distinct().ToArray();
-        var fromDutyList = hints.Where(h => h.Accepted)
-            .SelectMany(h => DutyListInspector.GetItemIds(h.QuestId))
+        var fromDutyList = acceptedQuestIds
+            .SelectMany(DutyListInspector.GetItemIds)
             .Where(HasKeyItem).Distinct().ToArray();
-        var candidates = direct.Length > 0 ? direct : fromDutyList;
-        var source = direct.Length > 0 ? "EVENT HANDLER" : "DUTY LIST";
+        var questLinked = acceptedQuestIds.Length == 1
+            ? NativeQuestInspector.GetQuestLinkedKeyItems(acceptedQuestIds[0])
+                .Where(HasKeyItem).Distinct().ToArray()
+            : Array.Empty<uint>();
+        var candidates = direct.Length > 0 ? direct :
+            fromDutyList.Length > 0 ? fromDutyList : questLinked;
+        var source = direct.Length > 0 ? "EVENT HANDLER" :
+            fromDutyList.Length > 0 ? "DUTY LIST" : "QUEST-LINKED KEY ITEM";
         if (candidates.Length == 0) return false;
         if (candidates.Length != 1)
         {
@@ -281,7 +291,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!armed)
         {
             Say($"{source} DRY RUN: target BaseId {target.BaseId}; candidate quest item {itemId} is held. " +
-                "This is only a candidate, not a validated usable item. /qic arm to test.");
+                "Quest association alone does not establish target compatibility. /qic arm to test.");
             return true;
         }
         var agent = AgentInventoryContext.Instance();
@@ -332,7 +342,22 @@ public sealed class Plugin : IDalamudPlugin
                  HasKeyItem(r.ItemId)).Select(r => r.ItemId).Distinct().ToArray();
         if (matches.Length > 0)
             Say($"Known/learned target mapping: {string.Join(", ", matches)}. You can now deselect and reselect for a dry run.");
-        Say("A zero EventItemId is expected for some quests. No item guessing is performed.");
+        var acceptedQuests = hints.Where(h => h.Accepted).Select(h => h.QuestId).Distinct().ToArray();
+        if (acceptedQuests.Length == 1)
+        {
+            var questLinkedCandidates = NativeQuestInspector.GetQuestLinkedKeyItems(acceptedQuests[0])
+                .Where(HasKeyItem).Distinct().ToArray();
+            if (questLinkedCandidates.Length == 1)
+                Say($"Experimental quest-linked fallback candidate: {questLinkedCandidates[0]} (one accepted quest, one owned associated item). " +
+                    "Reselect the target while disarmed for a dry-run.");
+            else if (questLinkedCandidates.Length > 1)
+                Say($"Quest-linked fallback: {questLinkedCandidates.Length} items; ambiguous, will skip.");
+            else
+                Say("Quest-linked fallback: no owned quest-associated items found.");
+        }
+        else if (acceptedQuests.Length > 1)
+            Say($"Quest-linked fallback disabled: {acceptedQuests.Length} accepted quest handlers on this target.");
+        Say("A zero EventItemId is normal for some quests. Unmapped items are never brute-forced.");
     }
 
     private static unsafe bool CombatConditionMet(QuestItemRule rule, IGameObject? target)

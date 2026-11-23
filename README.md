@@ -1,8 +1,10 @@
 # Personal FFXIV plugins
 
-## Quest Item Clicker 0.2.3.0 - mounted-target retry
+## Quest Item Clicker 0.2.4.0 - quest-linked Key Item fallback
 
 This plugin is a **research prototype**, not verified in-game. The Duty List fallback checks the game's tracked quest `QuestTodoList.TrackedQuest.ItemIds` when a quest handler's `GetEventItemId()` is zero. It requires a tracked quest with a matching accepted quest handler and an unambiguous held item. The new mode still triggers on target selection, not actual mouse clicks. It uses client-side quest event handlers to look for an associated event item, checks whether the quest is accepted, and checks whether that item appears in your Key Items inventory. No external Questionable quest path database is required for native hints.
+
+**New quest-linked fallback (0.2.4):** When a selected object identifies exactly one accepted quest and neither its event handler nor the tracked Duty List offers an item ID, the plugin examines the quest association stored on held Key Items. If exactly one distinct owned item belongs to that quest, it reports a `QUEST-LINKED KEY ITEM DRY RUN` or attempts it when armed. This is a heuristic, not proof the item works on that exact objective; the game can reject it. It never tries multiple candidate items. Use `/qic inspect` to review candidates.
 
 **Mounted target behavior (0.2.3):** Select an objective while riding and dismount normally. The plugin keeps that selection pending and, after the mount transition has finished, evaluates it once without another click. It will not dismount you automatically and it will not repeatedly spam item-use attempts. `/qic off` cancels pending actions; `/qic arm` enables actual item-use attempts.
 
