@@ -5,6 +5,7 @@ using System.Linq;
 using System.Numerics;
 using System.Text.Json;
 using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Game.Inventory;
 using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Game.Command;
 using Dalamud.Plugin;
@@ -15,7 +16,7 @@ using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 
 namespace QuestItemClicker;
 
-/// <summary>Experimental; dry-run is the default. Watches changes in target selection.</summary>
+/// <summary>Experimental native quest-item matching; disarmed by default. Watches target selection, not clicks.</summary>
 public sealed class Plugin : IDalamudPlugin
 {
     public string Name => "Quest Item Clicker (prototype)";
@@ -27,6 +28,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly IChatGui chat;
     private readonly ICommandManager commands;
     private readonly ICondition conditions;
+    private readonly IGameInventory inventory;
     private readonly string rulePath;
     private List<QuestItemRule> rules = new();
     private nint lastTargetAddress;
@@ -35,7 +37,7 @@ public sealed class Plugin : IDalamudPlugin
 
     public Plugin(IDalamudPluginInterface pluginInterface, IFramework framework,
         ITargetManager targets, IObjectTable objects, IClientState client,
-        IChatGui chat, ICommandManager commands, ICondition conditions)
+        IChatGui chat, ICommandManager commands, ICondition conditions, IGameInventory inventory)
     {
         this.framework = framework;
         this.targets = targets;
@@ -44,13 +46,14 @@ public sealed class Plugin : IDalamudPlugin
         this.chat = chat;
         this.commands = commands;
         this.conditions = conditions;
+        this.inventory = inventory;
         rulePath = Path.Combine(pluginInterface.GetPluginConfigDirectory(), "routes.json");
         Load();
         commands.AddHandler(Command, new CommandInfo(OnCommand) {
             HelpMessage = "Quest item clicker: /qic help. Starts DISARMED (dry run)."
         });
         framework.Update += OnUpdate;
-        Say($"Loaded {rules.Count} item mappings. DISARMED (dry run). /qic help");
+        Say($"Native inspection enabled; {rules.Count} legacy mappings. DISARMED (dry run). Try /qic inspect on a quest target.");
     }
 
     private void OnCommand(string cmd, string args)
@@ -88,12 +91,14 @@ public sealed class Plugin : IDalamudPlugin
             }
             catch (Exception e) { Say($"Import failed: {e.Message}"); }
         }
+        else if (action.Equals("inspect", StringComparison.OrdinalIgnoreCase))
+            InspectTarget();
         else if (action.Equals("use", StringComparison.OrdinalIgnoreCase))
             TryObjective(targets.Target, allowPositionOnly: true);
         else if (action.Equals("status", StringComparison.OrdinalIgnoreCase))
-            Say($"{(armed ? "ARMED" : "DISARMED")}; {rules.Count} mappings; target BaseId {targets.Target?.BaseId.ToString() ?? "none"}; territory {client.TerritoryType}.");
+            Say($"{(armed ? "ARMED" : "DISARMED")}; native inspection ON; {rules.Count} legacy mappings; target BaseId {targets.Target?.BaseId.ToString() ?? "none"}; territory {client.TerritoryType}.");
         else
-            Say("Commands: /qic import \"C:\\...\\QuestPaths\" | /qic arm | /qic off | /qic use | /qic reload | /qic status");
+            Say("Commands: /qic inspect | /qic arm | /qic off | /qic use | /qic status | /qic import \"C:\\...\\QuestPaths\" | /qic reload");
     }
 
     private void OnUpdate(IFramework _)
@@ -111,6 +116,7 @@ public sealed class Plugin : IDalamudPlugin
             conditions[ConditionFlag.BetweenAreas] || conditions[ConditionFlag.OccupiedInEvent]) return;
         if ((DateTime.UtcNow - lastAction).TotalSeconds < 2) return;
         var me = objects.LocalPlayer!;
+        if (target is not null && TryNativeObjective(target)) return;
         var manager = QuestManager.Instance();
         if (manager == null) return;
 
@@ -142,6 +148,67 @@ public sealed class Plugin : IDalamudPlugin
         if (agent == null) { Say("Unable to access item-use agent."); return; }
         agent->UseItem(candidate.ItemId, InventoryType.Invalid, 0, 0);
         Say($"Attempted quest item {candidate.ItemId} for quest {candidate.QuestId}. The game determines whether this succeeds.");
+    }
+
+
+    // Native data is a hint, not definitive proof that an item works on this objective.
+    // Never brute-force items. Only a unique, accepted-quest handler + owned item can proceed.
+    private bool TryNativeObjective(IGameObject target)
+    {
+        var hints = NativeQuestInspector.Inspect(target, inventory);
+        var candidates = hints.Where(h => h.Accepted && h.Owned && h.EventItemId != 0)
+            .Select(h => h.EventItemId).Distinct().ToArray();
+        if (candidates.Length == 0) return false;
+        if (candidates.Length != 1)
+        {
+            Say($"Native scan found {candidates.Length} different owned quest items: skipped.");
+            return true;
+        }
+
+        var me = objects.LocalPlayer;
+        if (me == null || Vector3.Distance(me.Position, target.Position) > 8f) return true;
+        if ((DateTime.UtcNow - lastAction).TotalSeconds < 2) return true;
+        var itemId = candidates[0];
+        lastAction = DateTime.UtcNow;
+        if (!armed)
+        {
+            Say($"NATIVE DRY RUN: target BaseId {target.BaseId}; accepted quest item {itemId} is held. " +
+                "This is only a candidate, not a validated usable item. /qic arm to test.");
+            return true;
+        }
+        var agent = AgentInventoryContext.Instance();
+        if (agent == null)
+        {
+            Say("Native match found, but item-use agent is unavailable.");
+            return true;
+        }
+        agent->UseItem(itemId, InventoryType.Invalid, 0, 0);
+        Say($"Native mode attempted item {itemId} on current target (game acceptance unverified).");
+        return true;
+    }
+
+    private void InspectTarget()
+    {
+        var target = targets.Target;
+        if (!client.IsLoggedIn || target is null)
+        {
+            Say("Select an NPC, enemy or object first, then /qic inspect.");
+            return;
+        }
+        var hints = NativeQuestInspector.Inspect(target, inventory);
+        Say($"Target: {target.Name}, BaseId {target.BaseId}; {hints.Count} quest event handlers.");
+        if (hints.Count == 0)
+        {
+            Say("No quest handlers reported. This objective may not expose usable item data.");
+            return;
+        }
+        foreach (var hint in hints.Take(8))
+        {
+            Say($"Quest {hint.QuestId}: {(hint.Accepted ? "accepted" : "not accepted")}, " +
+                $"EventItemId {hint.EventItemId}, {(hint.Owned ? "owned" : "not in Key Items")}.");
+        }
+        if (hints.Count > 8) Say($"Showing first 8 of {hints.Count} handlers.");
+        Say("GetEventItemId is a native hint, not guaranteed to be the correct use-item action.");
     }
 
     private static unsafe bool CombatConditionMet(QuestItemRule rule, IGameObject? target)
