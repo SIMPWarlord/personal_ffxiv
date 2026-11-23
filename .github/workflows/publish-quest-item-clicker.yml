@@ -81,7 +81,11 @@ jobs:
           assert manifest["InternalName"] == "QuestItemClicker"
           assert isinstance(manifest["DalamudApiLevel"], int)
           tag = f"QuestItemClicker-v{version}"
-          url = f"https://github.com/{os.environ['GH_REPO']}/releases/download/{tag}/latest.zip"
+          if os.environ["GITHUB_EVENT_NAME"] == "push":
+              # The GitHub Actions token may not create releases on app-authored pushes.
+              url = f"https://raw.githubusercontent.com/{os.environ['GH_REPO']}/main/dist/{tag}/latest.zip"
+          else:
+              url = f"https://github.com/{os.environ['GH_REPO']}/releases/download/{tag}/latest.zip"
           feed_path = Path("pluginmaster.json")
           entries = json.loads(feed_path.read_text(encoding="utf-8-sig"))
           assert isinstance(entries, list)
@@ -108,7 +112,21 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"tag={tag}\nversion={version}\n")
           PY
+      - name: Stage public versioned ZIP (one-time push release)
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.prepare.outputs.version }}"
+          path="dist/QuestItemClicker-v${version}/latest.zip"
+          mkdir -p "$(dirname "$path")"
+          if test -f "$path"; then
+            cmp staged/latest.zip "$path" || { echo "Existing versioned package differs"; exit 1; }
+          else
+            cp staged/latest.zip "$path"
+          fi
       - name: Publish versioned release
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         shell: bash
         env:
           TAG: ${{ steps.prepare.outputs.tag }}
@@ -132,7 +150,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pluginmaster.json
+          git add pluginmaster.json dist/
           if ! git diff --cached --quiet; then
             git commit -m "Publish Quest Item Clicker ${{ steps.prepare.outputs.version }}"
             git push origin HEAD:main
