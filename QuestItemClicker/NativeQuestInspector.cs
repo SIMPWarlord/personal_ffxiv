@@ -19,6 +19,27 @@ internal static unsafe class NativeQuestInspector
 {
     internal readonly record struct Hint(ushort QuestId, uint EventItemId, bool Accepted, bool Owned);
 
+    // Item.EventId can sometimes associate a held key item with its originating quest.
+    // This association is informational; it does not prove the item is valid on any target.
+    internal static List<uint> GetQuestLinkedKeyItems(ushort questId)
+    {
+        var matches = new List<uint>();
+        var inventoryManager = InventoryManager.Instance();
+        if (inventoryManager == null) return matches;
+
+        var bag = inventoryManager->GetInventoryContainer(InventoryType.KeyItems);
+        if (bag == null || !bag->IsLoaded || bag->Items == null) return matches;
+        var limit = Math.Min(bag->Size, 256);
+        for (var i = 0; i < limit; i++)
+        {
+            var item = bag->Items[i];
+            if (item.ItemId == 0 || item.Quantity <= 0) continue;
+            if (item.EventId.ContentId == EventHandlerContent.Quest && item.EventId.EntryId == questId)
+                matches.Add(item.ItemId);
+        }
+        return matches;
+    }
+
     internal static List<Hint> Inspect(IGameObject target, IGameInventory inventory)
     {
         var results = new List<Hint>();

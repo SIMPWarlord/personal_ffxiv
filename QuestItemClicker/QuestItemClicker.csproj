@@ -4,16 +4,16 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Version>0.2.0.0</Version>
-    <AssemblyVersion>0.2.0.0</AssemblyVersion>
-    <FileVersion>0.2.0.0</FileVersion>
+    <Version>0.2.1.0</Version>
+    <AssemblyVersion>0.2.1.0</AssemblyVersion>
+    <FileVersion>0.2.1.0</FileVersion>
     <Authors>SIMPWarlord</Authors>
     <Author>SIMPWarlord</Author>
     <Name>Quest Item Clicker</Name>
     <Punchline>Experimental quest item helper; starts in dry-run mode.</Punchline>
     <RepoUrl>https://github.com/SIMPWarlord/personal_ffxiv</RepoUrl>
     <Tags>quest;utility</Tags>
-    <Changelog>Native quest handler and key-item inspection; legacy route import remains optional.</Changelog>
+    <Changelog>Display quest-linked key items, add learned target bindings and a verified Patching Up mapping.</Changelog>
     <Description>Experimental native event-item matching for manually selected quest objectives.</Description>
     <DalamudApiLevel>15</DalamudApiLevel>
   </PropertyGroup>

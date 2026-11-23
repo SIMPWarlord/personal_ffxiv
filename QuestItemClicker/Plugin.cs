@@ -30,6 +30,15 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ICondition conditions;
     private readonly IGameInventory inventory;
     private readonly string rulePath;
+    private static readonly QuestItemRule[] ConfirmedExampleRules =
+    [
+        // Questionable's 4570_Patching Up.json: same quest item on three trunks.
+        // A known quest-path exception, not a native dynamic deduction.
+        new(4570, 1, 957, 2012900, 2003405, "UseItem"),
+        new(4570, 1, 957, 2012901, 2003405, "UseItem"),
+        new(4570, 1, 957, 2012902, 2003405, "UseItem"),
+    ];
+    private List<QuestItemRule> localRules = new();
     private List<QuestItemRule> rules = new();
     private nint lastTargetAddress;
     private DateTime lastAction = DateTime.MinValue;
@@ -53,7 +62,7 @@ public sealed class Plugin : IDalamudPlugin
             HelpMessage = "Quest item clicker: /qic help. Starts DISARMED (dry run)."
         });
         framework.Update += OnUpdate;
-        Say($"Native inspection enabled; {rules.Count} legacy mappings. DISARMED (dry run). Try /qic inspect on a quest target.");
+        Say($"Native inspection enabled; {rules.Count} known + local mappings. DISARMED (dry run). Try /qic inspect on a quest target.");
     }
 
     private void OnCommand(string cmd, string args)
@@ -86,19 +95,24 @@ public sealed class Plugin : IDalamudPlugin
                 Directory.CreateDirectory(Path.GetDirectoryName(rulePath)!);
                 File.WriteAllText(rulePath, JsonSerializer.Serialize(imported,
                     new JsonSerializerOptions { WriteIndented = true }));
-                rules = imported;
-                Say($"Imported {rules.Count} mappings from {files} quest files; {skipped} malformed/unsupported steps skipped. DISARMED.");
+                localRules = imported;
+                RebuildRules();
+                Say($"Imported {localRules.Count} mappings from {files} quest files; {skipped} malformed/unsupported steps skipped. DISARMED.");
             }
             catch (Exception e) { Say($"Import failed: {e.Message}"); }
         }
         else if (action.Equals("inspect", StringComparison.OrdinalIgnoreCase))
             InspectTarget();
+        else if (action.StartsWith("bind ", StringComparison.OrdinalIgnoreCase))
+            BindTarget(action.Substring(5).Trim());
+        else if (action.Equals("forget", StringComparison.OrdinalIgnoreCase))
+            ForgetTarget();
         else if (action.Equals("use", StringComparison.OrdinalIgnoreCase))
             TryObjective(targets.Target, allowPositionOnly: true);
         else if (action.Equals("status", StringComparison.OrdinalIgnoreCase))
             Say($"{(armed ? "ARMED" : "DISARMED")}; native inspection ON; {rules.Count} legacy mappings; target BaseId {targets.Target?.BaseId.ToString() ?? "none"}; territory {client.TerritoryType}.");
         else
-            Say("Commands: /qic inspect | /qic arm | /qic off | /qic use | /qic status | /qic import \"C:\\...\\QuestPaths\" | /qic reload");
+            Say("Commands: /qic inspect | /qic bind <itemId> | /qic forget | /qic arm | /qic off | /qic use | /qic status | /qic import \"path\" | /qic reload");
     }
 
     private void OnUpdate(IFramework _)
@@ -129,7 +143,7 @@ public sealed class Plugin : IDalamudPlugin
              || (allowPositionOnly && rule.TargetDataId == 0 &&
                  rule.X is not null && rule.Y is not null && rule.Z is not null &&
                  Vector3.Distance(me.Position, new Vector3(rule.X.Value, rule.Y.Value, rule.Z.Value)) < 5f))
-            && CombatConditionMet(rule, target)).ToArray();
+            && HasKeyItem(rule.ItemId) && CombatConditionMet(rule, target)).ToArray();
 
         if (candidates.Length == 0) return;
         if (candidates.Select(c => c.ItemId).Distinct().Count() != 1)
@@ -141,7 +155,7 @@ public sealed class Plugin : IDalamudPlugin
         lastAction = DateTime.UtcNow;
         if (!armed)
         {
-            Say($"DRY RUN: quest {candidate.QuestId}, sequence {candidate.Sequence}, target {candidate.TargetDataId}, would use item {candidate.ItemId}. /qic arm to enable.");
+            Say($"MAPPING DRY RUN: quest {candidate.QuestId}, sequence {candidate.Sequence}, target {candidate.TargetDataId}, item {candidate.ItemId}. Source: known or learned rule. /qic arm to test.");
             return;
         }
         var agent = AgentInventoryContext.Instance();
@@ -208,7 +222,19 @@ public sealed class Plugin : IDalamudPlugin
                 $"EventItemId {hint.EventItemId}, {(hint.Owned ? "owned" : "not in Key Items")}.");
         }
         if (hints.Count > 8) Say($"Showing first 8 of {hints.Count} handlers.");
-        Say("GetEventItemId is a native hint, not guaranteed to be the correct use-item action.");
+        foreach (var questId in hints.Where(h => h.Accepted).Select(h => h.QuestId).Distinct())
+        {
+            var linked = NativeQuestInspector.GetQuestLinkedKeyItems(questId);
+            if (linked.Count > 0)
+                Say($"Quest {questId} key-item event association: {string.Join(", ", linked)}. NOT proven usable on target.");
+        }
+        var matches = rules.Where(r => r.TargetDataId == target.BaseId &&
+                 r.TerritoryId == client.TerritoryType &&
+                 hints.Any(h => h.Accepted && h.QuestId == r.QuestId) &&
+                 HasKeyItem(r.ItemId)).Select(r => r.ItemId).Distinct().ToArray();
+        if (matches.Length > 0)
+            Say($"Known/learned target mapping: {string.Join(", ", matches)}. You can now deselect and reselect for a dry run.");
+        Say("A zero EventItemId is expected for some quests. No item guessing is performed.");
     }
 
     private static unsafe bool CombatConditionMet(QuestItemRule rule, IGameObject? target)
@@ -225,13 +251,73 @@ public sealed class Plugin : IDalamudPlugin
         return false;
     }
 
+    private bool HasKeyItem(uint itemId)
+    {
+        foreach (var item in inventory.GetInventoryItems(GameInventoryType.KeyItems))
+            if (!item.IsEmpty && item.Quantity > 0 && item.ItemId == itemId)
+                return true;
+        return false;
+    }
+
+    private unsafe void BindTarget(string itemText)
+    {
+        if (!uint.TryParse(itemText, out var itemId) || itemId == 0)
+        {
+            Say("Usage: /qic bind <numeric key item ID>. This saves a single target-specific mapping.");
+            return;
+        }
+        var target = targets.Target;
+        if (target == null || !client.IsLoggedIn) { Say("Select a quest target first."); return; }
+        if (!HasKeyItem(itemId)) { Say($"Item {itemId} is not present in Key Items. Nothing saved."); return; }
+        if (objects.LocalPlayer == null || Vector3.Distance(objects.LocalPlayer.Position, target.Position) > 8f)
+        {
+            Say("Stand within 8 units of the target before binding an item."); return;
+        }
+        var accepted = NativeQuestInspector.Inspect(target, inventory)
+            .Where(h => h.Accepted).Select(h => (uint)h.QuestId).Distinct().ToArray();
+        if (accepted.Length != 1) { Say("Could not uniquely identify an accepted quest for this target; nothing saved."); return; }
+        var qid = accepted[0];
+        var sequence = (int)QuestManager.GetQuestSequence(qid);
+        var rule = new QuestItemRule(qid, sequence, client.TerritoryType, target.BaseId, itemId, "UseItem");
+        localRules.RemoveAll(r => r.QuestId == qid && r.TerritoryId == client.TerritoryType && r.TargetDataId == target.BaseId);
+        localRules.Add(rule);
+        SaveLocalRules();
+        RebuildRules();
+        armed = false;
+        Say($"Saved QUEST {qid}, sequence {sequence}, target {target.BaseId} -> item {itemId}. DISARMED. Reselect for dry-run.");
+    }
+
+    private void ForgetTarget()
+    {
+        var target = targets.Target;
+        if (target == null) { Say("Select the target whose learned binding you want to forget."); return; }
+        var hints = NativeQuestInspector.Inspect(target, inventory);
+        var qids = hints.Where(h => h.Accepted).Select(h => (uint)h.QuestId).ToHashSet();
+        var removed = localRules.RemoveAll(r => r.TargetDataId == target.BaseId &&
+            r.TerritoryId == client.TerritoryType && qids.Contains(r.QuestId));
+        if (removed > 0) { SaveLocalRules(); RebuildRules(); }
+        armed = false;
+        Say($"Removed {removed} local mappings; known example rules are not altered. DISARMED.");
+    }
+
+    private void SaveLocalRules()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(rulePath)!);
+        File.WriteAllText(rulePath, JsonSerializer.Serialize(localRules,
+            new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private void RebuildRules() =>
+        rules = localRules.Concat(ConfirmedExampleRules).Distinct().ToList();
+
     private void Load()
     {
         try
         {
-            rules = File.Exists(rulePath) ? JsonSerializer.Deserialize<List<QuestItemRule>>(File.ReadAllText(rulePath)) ?? new() : new();
+            localRules = File.Exists(rulePath) ? JsonSerializer.Deserialize<List<QuestItemRule>>(File.ReadAllText(rulePath)) ?? new() : new();
         }
-        catch (Exception e) { rules = new(); Say($"Unable to read mapping file: {e.Message}"); }
+        catch (Exception e) { localRules = new(); Say($"Unable to read mapping file: {e.Message}"); }
+        RebuildRules();
     }
     private void Say(string msg) => chat.Print($"[QuestItemClicker] {msg}");
     public void Dispose()

@@ -1,6 +1,6 @@
 # Personal FFXIV plugins
 
-## Quest Item Clicker 0.2.0.0 - experimental native inspection
+## Quest Item Clicker 0.2.1.0 - diagnostic and learned-binding update
 
 This plugin is a **research prototype**, not verified in-game. It uses client-side quest event handlers to look for an associated event item, checks whether the quest is accepted, and checks whether that item appears in your Key Items inventory. No external Questionable quest path database is required for native hints.
 
@@ -12,11 +12,14 @@ This plugin is a **research prototype**, not verified in-game. It uses client-si
 3. Select a quest NPC / enemy / ground object.
 4. Type `/qic inspect` to print native quest handlers and associated EventItemId values.
 5. Deselect and reselect while DISARMED to see a `NATIVE DRY RUN` message when there is exactly one matching accepted-quest, owned key item.
-6. Only if the debug output is correct, try `/qic arm`. This opt-in allows item-use attempts on a unique candidate. `/qic off` disarms immediately.
+6. If the object has no native item ID, you can use `/qic bind 2003405` to save a user-verified item mapping for the currently selected accepted quest and target (replace with the correct ID). For quest 4570, the three known Great Trunk mappings are included as a diagnostic test. Neither approach brute-forces items.
+7. Only if the dry-run output is correct, try `/qic arm`. This opt-in allows item-use attempts on a unique candidate. `/qic off` disarms immediately.
 
 ### Commands
 
-- `/qic inspect`: print quest-event handlers, item hint IDs, and whether they are held
+- `/qic inspect`: print quest-event handlers, item hint IDs, quest-linked key items and known/learned mappings
+- `/qic bind <itemId>`: learn a single selected target-to-item mapping, saving to the existing local routes file (disarms)
+- `/qic forget`: remove the currently selected target's user-learned mapping (disarms)
 - `/qic status`: show current state
 - `/qic arm`: opt in to native and legacy item-use attempts
 - `/qic off`: disable item use (dry-run only)
@@ -26,6 +29,6 @@ This plugin is a **research prototype**, not verified in-game. It uses client-si
 
 ### Development and release
 
-Pushes to `QuestItemClicker/**` trigger the Windows GitHub Actions build workflow. A compiled test artifact is NOT an automatic public release. Only manually run the **Publish Quest Item Clicker (manual)** workflow after checking the build and testing it in FFXIV. **Published:** version 0.2.0.0 is available to Dalamud via `pluginmaster.json`, with its verified ZIP hosted under `dist/QuestItemClicker-v0.2.0.0/latest.zip` on the public repository. Future updates remain manual unless separately authorized.
+Pushes to `QuestItemClicker/**` trigger the Windows GitHub Actions build workflow. A compiled test artifact is NOT an automatic public release. Only manually run the **Publish Quest Item Clicker (manual)** workflow after checking the build and testing it in FFXIV. **Current public release:** version 0.2.0.0 is available to Dalamud via `pluginmaster.json`, with its verified ZIP hosted under `dist/QuestItemClicker-v0.2.0.0/latest.zip` on the public repository. Future updates remain manual unless separately authorized.
 
 Third-party plugins and gameplay automation are not officially supported by FFXIV and may violate the game's terms.
