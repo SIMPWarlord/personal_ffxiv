@@ -1,0 +1,4 @@
+One-time publishing trigger for Quest Item Clicker v0.2.3.0
+Verified GitHub Actions build: 45112376730
+Source commit: 57af8681b267c891f7d5701c795bd72b9e7114ae
+Feature: defer a selected target while mounted and attempt after dismount once.
