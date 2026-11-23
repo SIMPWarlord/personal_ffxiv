@@ -58,7 +58,7 @@ jobs:
           merge-multiple: true
           path: staged
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.run_id }}
+          run-id: ${{ env.RUN_ID }}
       - name: Validate manifest and generate feed
         id: prepare
         shell: bash
