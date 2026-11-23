@@ -170,12 +170,20 @@ public sealed class Plugin : IDalamudPlugin
     private unsafe bool TryNativeObjective(IGameObject target)
     {
         var hints = NativeQuestInspector.Inspect(target, inventory);
-        var candidates = hints.Where(h => h.Accepted && h.Owned && h.EventItemId != 0)
+        // First try the event handler's own item ID. When it is zero, use the
+        // item shortcut data already attached to this quest in the Duty List.
+        // Neither source proves the item is valid on this specific objective.
+        var direct = hints.Where(h => h.Accepted && h.Owned && h.EventItemId != 0)
             .Select(h => h.EventItemId).Distinct().ToArray();
+        var fromDutyList = hints.Where(h => h.Accepted)
+            .SelectMany(h => DutyListInspector.GetItemIds(h.QuestId))
+            .Where(HasKeyItem).Distinct().ToArray();
+        var candidates = direct.Length > 0 ? direct : fromDutyList;
+        var source = direct.Length > 0 ? "EVENT HANDLER" : "DUTY LIST";
         if (candidates.Length == 0) return false;
         if (candidates.Length != 1)
         {
-            Say($"Native scan found {candidates.Length} different owned quest items: skipped.");
+            Say($"{source} scan found {candidates.Length} different owned quest items: skipped.");
             return true;
         }
 
@@ -186,18 +194,18 @@ public sealed class Plugin : IDalamudPlugin
         lastAction = DateTime.UtcNow;
         if (!armed)
         {
-            Say($"NATIVE DRY RUN: target BaseId {target.BaseId}; accepted quest item {itemId} is held. " +
+            Say($"{source} DRY RUN: target BaseId {target.BaseId}; candidate quest item {itemId} is held. " +
                 "This is only a candidate, not a validated usable item. /qic arm to test.");
             return true;
         }
         var agent = AgentInventoryContext.Instance();
         if (agent == null)
         {
-            Say("Native match found, but item-use agent is unavailable.");
+            Say($"{source} match found, but item-use agent is unavailable.");
             return true;
         }
         agent->UseItem(itemId, InventoryType.Invalid, 0, 0);
-        Say($"Native mode attempted item {itemId} on current target (game acceptance unverified).");
+        Say($"{source} mode attempted item {itemId} on current target (game acceptance unverified).");
         return true;
     }
 
@@ -227,6 +235,10 @@ public sealed class Plugin : IDalamudPlugin
             var linked = NativeQuestInspector.GetQuestLinkedKeyItems(questId);
             if (linked.Count > 0)
                 Say($"Quest {questId} key-item event association: {string.Join(", ", linked)}. NOT proven usable on target.");
+            var dutyIds = DutyListInspector.GetItemIds(questId);
+            Say(dutyIds.Count == 0
+                ? $"Quest {questId} Duty List item IDs: none found (quest might not be tracked)."
+                : $"Quest {questId} Duty List item IDs: {string.Join(", ", dutyIds.Select(id => id + (HasKeyItem(id) ? " [held]" : " [not held]")))}.");
         }
         var matches = rules.Where(r => r.TargetDataId == target.BaseId &&
                  r.TerritoryId == client.TerritoryType &&
