@@ -1,12 +1,17 @@
 name: Publish Quest Item Clicker (manual)
 
 on:
+  # One-time push trigger for the user-requested v0.2 publication.
+  push:
+    branches: [main]
+    paths:
+      - '.release-triggers/quest-item-clicker-v0.2.0.0'
   workflow_dispatch:
     inputs:
       run_id:
         description: 'Successful Quest Item Clicker test build run ID'
         required: true
-        default: '44830713279'
+        default: '45108066933'
       confirm:
         description: 'Publish this experimental build for installation (must be checked)'
         type: boolean
@@ -23,12 +28,12 @@ concurrency:
 
 jobs:
   publish:
-    if: ${{ inputs.confirm && github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/main' && ((github.event_name == 'workflow_dispatch' && inputs.confirm) || github.event_name == 'push') }}
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      RUN_ID: ${{ inputs.run_id }}
+      RUN_ID: ${{ github.event_name == 'push' && '45108066933' || inputs.run_id }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -117,7 +122,7 @@ jobs:
             gh release download "$TAG" --pattern latest.zip --dir existing
             cmp staged/latest.zip existing/latest.zip || { echo "Version already exists with different bytes; bump the plugin version."; exit 1; }
           else
-            gh release create "$TAG" staged/latest.zip --target "$BUILD_SHA" --title "Quest Item Clicker $VERSION (experimental)" --notes "Experimental build; compiled but not verified in FFXIV. Dry-run is the default. Import compatible local quest-path data before testing."
+            gh release create "$TAG" staged/latest.zip --target "$BUILD_SHA" --title "Quest Item Clicker $VERSION (experimental)" --notes "Experimental build; compiled but not verified in FFXIV. Native quest-item hints now work without importing Questionable quest-path data. Starts disarmed; /qic inspect and dry-run before /qic arm."
           fi
           curl --fail --location --silent --show-error "https://github.com/$GH_REPO/releases/download/$TAG/latest.zip" -o downloaded.zip
           cmp staged/latest.zip downloaded.zip
