@@ -39,6 +39,8 @@ public sealed class Plugin : IDalamudPlugin
     private readonly record struct GroundPending(ushort QuestId, uint ItemId, uint TerritoryId,
         Vector3 Position, DateTime CreatedUtc);
     private readonly string rulePath;
+    private readonly string settingsPath;
+    private bool debugEnabled;
     private static readonly QuestItemRule[] ConfirmedExampleRules =
     [
         // Questionable's 4570_Patching Up.json: same quest item on three trunks.
@@ -73,13 +75,15 @@ public sealed class Plugin : IDalamudPlugin
         this.gameGui = gameGui;
         this.pluginInterface = pluginInterface;
         rulePath = Path.Combine(pluginInterface.GetPluginConfigDirectory(), "routes.json");
+        settingsPath = Path.Combine(pluginInterface.GetPluginConfigDirectory(), "settings.json");
+        LoadDebugSetting();
         Load();
         commands.AddHandler(Command, new CommandInfo(OnCommand) {
             HelpMessage = "Quest item clicker: /qic help. Starts DISARMED (dry run)."
         });
         framework.Update += OnUpdate;
         pluginInterface.UiBuilder.Draw += OnDraw;
-        Say($"Native inspection enabled; {rules.Count} known + local mappings. DISARMED (dry run). Try /qic inspect on a quest target.");
+        Debug($"Native inspection enabled; {rules.Count} known + local mappings. DISARMED (dry run). Try /qic inspect on a quest target.");
     }
 
     private void OnCommand(string cmd, string args)
@@ -128,6 +132,9 @@ public sealed class Plugin : IDalamudPlugin
             }
             catch (Exception e) { Say($"Import failed: {e.Message}"); }
         }
+        else if (action.Equals("debug", StringComparison.OrdinalIgnoreCase) ||
+                 action.StartsWith("debug ", StringComparison.OrdinalIgnoreCase))
+            HandleDebugCommand(action);
         else if (action.Equals("inspect", StringComparison.OrdinalIgnoreCase))
             InspectTarget();
         else if (action.Equals("area", StringComparison.OrdinalIgnoreCase))
@@ -141,9 +148,9 @@ public sealed class Plugin : IDalamudPlugin
         else if (action.Equals("status", StringComparison.OrdinalIgnoreCase))
             Say($"{(armed ? "ARMED" : "DISARMED")}; native inspection ON; {rules.Count} mappings; " +
                 $"target BaseId {targets.Target?.BaseId.ToString() ?? "none"}; territory {client.TerritoryType}; " +
-                $"pending mounted selection: {queuedWhileMounted && pendingTargetAddress != 0}.");
+                $"pending mounted selection: {queuedWhileMounted && pendingTargetAddress != 0}; debug {(debugEnabled ? "ON" : "OFF")}.");
         else
-            Say("Commands: /qic inspect | /qic area | /qic bind <itemId> | /qic forget | /qic arm | /qic off | /qic use | /qic status | /qic import \"path\" | /qic reload");
+            Say("Commands: /qic debug [on|off|status] | /qic inspect | /qic area | /qic bind <itemId> | /qic forget | /qic arm | /qic off | /qic use | /qic status | /qic import \"path\" | /qic reload");
     }
 
     private bool IsMountBlocked() =>
@@ -195,7 +202,7 @@ public sealed class Plugin : IDalamudPlugin
             {
                 queuedWhileMounted = true;
                 dismountReadySince = DateTime.MinValue;
-                Say("Target selected while mounted. Will evaluate it after dismount; no need to reselect.");
+                Debug("Target selected while mounted. Will evaluate it after dismount; no need to reselect.");
             }
             return;
         }
@@ -238,7 +245,7 @@ public sealed class Plugin : IDalamudPlugin
                 pendingTargetAddress = (nint)target.Address;
                 queuedWhileMounted = true;
                 dismountReadySince = DateTime.MinValue;
-                Say("Cannot use an item while mounted. Keeping this target queued until dismount.");
+                Debug("Cannot use an item while mounted. Keeping this target queued until dismount.");
             }
             return;
         }
@@ -262,20 +269,20 @@ public sealed class Plugin : IDalamudPlugin
         if (candidates.Length == 0) return;
         if (candidates.Select(c => c.ItemId).Distinct().Count() != 1)
         {
-            Say("Ambiguous quest item matches: skipped. Use the item manually.");
+            Debug("Ambiguous quest item matches: skipped. Use the item manually.");
             return;
         }
         var candidate = candidates[0];
         lastAction = DateTime.UtcNow;
         if (!armed)
         {
-            Say($"MAPPING DRY RUN: quest {candidate.QuestId}, sequence {candidate.Sequence}, target {candidate.TargetDataId}, item {candidate.ItemId}. Source: known or learned rule. /qic arm to test.");
+            Debug($"MAPPING DRY RUN: quest {candidate.QuestId}, sequence {candidate.Sequence}, target {candidate.TargetDataId}, item {candidate.ItemId}. Source: known or learned rule. /qic arm to test.");
             return;
         }
         var agent = AgentInventoryContext.Instance();
-        if (agent == null) { Say("Unable to access item-use agent."); return; }
+        if (agent == null) { Debug("Unable to access item-use agent."); return; }
         agent->UseItem(candidate.ItemId, InventoryType.Invalid, 0, 0);
-        Say($"Attempted quest item {candidate.ItemId} for quest {candidate.QuestId}. The game determines whether this succeeds.");
+        Debug($"Attempted quest item {candidate.ItemId} for quest {candidate.QuestId}. The game determines whether this succeeds.");
     }
 
 
@@ -307,7 +314,7 @@ public sealed class Plugin : IDalamudPlugin
         if (candidates.Length == 0) return false;
         if (candidates.Length != 1)
         {
-            Say($"{source} scan found {candidates.Length} different owned quest items: skipped.");
+            Debug($"{source} scan found {candidates.Length} different owned quest items: skipped.");
             return true;
         }
 
@@ -318,18 +325,18 @@ public sealed class Plugin : IDalamudPlugin
         lastAction = DateTime.UtcNow;
         if (!armed)
         {
-            Say($"{source} DRY RUN: target BaseId {target.BaseId}; candidate quest item {itemId} is held. " +
+            Debug($"{source} DRY RUN: target BaseId {target.BaseId}; candidate quest item {itemId} is held. " +
                 "Quest association alone does not establish target compatibility. /qic arm to test.");
             return true;
         }
         var agent = AgentInventoryContext.Instance();
         if (agent == null)
         {
-            Say($"{source} match found, but item-use agent is unavailable.");
+            Debug($"{source} match found, but item-use agent is unavailable.");
             return true;
         }
         agent->UseItem(itemId, InventoryType.Invalid, 0, 0);
-        Say($"{source} mode attempted item {itemId} on current target (game acceptance unverified).");
+        Debug($"{source} mode attempted item {itemId} on current target (game acceptance unverified).");
         return true;
     }
 
@@ -423,7 +430,7 @@ public sealed class Plugin : IDalamudPlugin
         var acceptedQuests = areas.Select(a => a.QuestId).Distinct().ToArray();
         if (acceptedQuests.Length != 1)
         {
-            Say($"GROUND: {acceptedQuests.Length} quests overlap here. Skipped.");
+            Debug($"GROUND: {acceptedQuests.Length} quests overlap here. Skipped.");
             return;
         }
         var questId = acceptedQuests[0];
@@ -434,7 +441,7 @@ public sealed class Plugin : IDalamudPlugin
         var ids = linked.Length != 0 ? linked : duty;
         if (ids.Length != 1)
         {
-            Say(ids.Length == 0
+            Debug(ids.Length == 0
                 ? $"GROUND: quest {questId} area found, but no held quest-linked item."
                 : $"GROUND: quest {questId} has {ids.Length} candidate items; skipped.");
             return;
@@ -442,7 +449,7 @@ public sealed class Plugin : IDalamudPlugin
         var itemId = ids[0];
         if (!armed)
         {
-            Say($"GROUND DRY RUN: quest {questId}, item {itemId}, clicked " +
+            Debug($"GROUND DRY RUN: quest {questId}, item {itemId}, clicked " +
                 $"({point.X:F1}, {point.Y:F1}, {point.Z:F1}). " +
                 "Association does not prove the objective accepts it. /qic arm to try.");
             return;
@@ -451,7 +458,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             groundPending = new GroundPending(questId, itemId, client.TerritoryType, point, DateTime.UtcNow);
             groundDismountReady = DateTime.MinValue;
-            Say($"GROUND: queued quest {questId}, item {itemId} until dismount.");
+            Debug($"GROUND: queued quest {questId}, item {itemId} until dismount.");
             return;
         }
         UseGroundItem(questId, itemId, point);
@@ -487,7 +494,7 @@ public sealed class Plugin : IDalamudPlugin
             matches.All(m => m.QuestId != pending.QuestId) ||
             !HasKeyItem(pending.ItemId))
         {
-            Say("GROUND: queued area/item no longer matches; cancelled.");
+            Debug("GROUND: queued area/item no longer matches; cancelled.");
             return;
         }
         UseGroundItem(pending.QuestId, pending.ItemId, pending.Position);
@@ -499,11 +506,11 @@ public sealed class Plugin : IDalamudPlugin
             conditions[ConditionFlag.BetweenAreas] ||
             (DateTime.UtcNow - lastAction).TotalSeconds < 2) return;
         var manager = ActionManager.Instance();
-        if (manager == null) { Say("GROUND: ActionManager unavailable."); return; }
+        if (manager == null) { Debug("GROUND: ActionManager unavailable."); return; }
         var pos = point;
         var success = manager->UseActionLocation(ActionType.EventItem, itemId, location: &pos);
         lastAction = DateTime.UtcNow;
-        Say($"GROUND: quest {questId}, item {itemId}, UseActionLocation returned {success}. " +
+        Debug($"GROUND: quest {questId}, item {itemId}, UseActionLocation returned {success}. " +
             "The game determines whether it advances the quest.");
     }
 
@@ -598,6 +605,63 @@ public sealed class Plugin : IDalamudPlugin
         catch (Exception e) { localRules = new(); Say($"Unable to read mapping file: {e.Message}"); }
         RebuildRules();
     }
+    // Debug output is opt-in. This is separate from explicit command replies.
+    private void Debug(string message)
+    {
+        if (debugEnabled) Say(message);
+    }
+
+    private void LoadDebugSetting()
+    {
+        debugEnabled = false;
+        if (!File.Exists(settingsPath)) return;
+        try
+        {
+            using var json = JsonDocument.Parse(File.ReadAllText(settingsPath));
+            if (json.RootElement.TryGetProperty("Debug", out var property) &&
+                (property.ValueKind == JsonValueKind.True || property.ValueKind == JsonValueKind.False))
+                debugEnabled = property.GetBoolean();
+        }
+        catch (Exception) { /* Malformed or missing settings: default to quiet mode. */ }
+    }
+
+    private void SaveDebugSetting()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+        File.WriteAllText(settingsPath, JsonSerializer.Serialize(
+            new { Debug = debugEnabled }, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private void HandleDebugCommand(string action)
+    {
+        var mode = action.Length == 5 ? "" : action.Substring(5).Trim();
+        if (mode.Equals("status", StringComparison.OrdinalIgnoreCase))
+        {
+            Say($"Debug logging is {(debugEnabled ? "ON" : "OFF")}. Use /qic debug on or /qic debug off.");
+            return;
+        }
+        if (mode.Length == 0)
+            debugEnabled = !debugEnabled;
+        else if (mode.Equals("on", StringComparison.OrdinalIgnoreCase))
+            debugEnabled = true;
+        else if (mode.Equals("off", StringComparison.OrdinalIgnoreCase))
+            debugEnabled = false;
+        else
+        {
+            Say("Usage: /qic debug [on|off|status]. With no argument, toggles debug.");
+            return;
+        }
+        try
+        {
+            SaveDebugSetting();
+            Say($"Debug logging {(debugEnabled ? "enabled" : "disabled")}; setting saved.");
+        }
+        catch (Exception e)
+        {
+            Say($"Debug logging {(debugEnabled ? "enabled" : "disabled")} for this session, but could not save: {e.Message}");
+        }
+    }
+
     private void Say(string msg) => chat.Print($"[QuestItemClicker] {msg}");
     public void Dispose()
     {

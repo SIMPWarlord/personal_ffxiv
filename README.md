@@ -1,8 +1,10 @@
 # Personal FFXIV plugins
 
-## Quest Item Clicker 0.2.5.0 - ground-targeted quest items
+## Quest Item Clicker 0.2.6.0 - optional debug logging
 
 This plugin is a **research prototype**, not verified in-game. The Duty List fallback checks the game's tracked quest `QuestTodoList.TrackedQuest.ItemIds` when a quest handler's `GetEventItemId()` is zero. It requires a tracked quest with a matching accepted quest handler and an unambiguous held item. The new mode still triggers on target selection, not actual mouse clicks. It uses client-side quest event handlers to look for an associated event item, checks whether the quest is accepted, and checks whether that item appears in your Key Items inventory. No external Questionable quest path database is required for native hints.
+
+**Quiet by default (0.2.6):** Routine automatic messages (candidate matching, item-use attempts, ground-click diagnostics, mount/dismount retries, and dry-run output) no longer fill chat unless debug logging is enabled. Use `/qic debug on` to see them, `/qic debug off` to hide them, or `/qic debug` to toggle. `/qic debug status` reports the state. The setting persists across plugin reloads and game restarts in the plugin's local `settings.json`. Explicit command confirmations, errors from commands, `/qic status`, `/qic inspect`, and `/qic area` remain visible when requested. With debug off, dry-run attempts are silent; to inspect candidates, enable debug or use the explicit inspection commands.
 
 **Experimental ground AoE clicks (0.2.5):** On a left click in the 3D game world, the plugin raycasts the terrain. If the click is within 12 yalms of a game-authored area-marker center, within its radius, within 25 yalms of you, and belongs to exactly one accepted quest with exactly one held linked quest item, a dry-run or action is generated. When armed, it uses `ActionManager.UseActionLocation(ActionType.EventItem, itemId, location: &clickedGround)`. Clicks on ImGui windows and on targetable objects are ignored by the AoE path. `/qic area` shows quest-area markers for debugging. This does **not** recognize clicking on the world map or minimap, and map area markers are not proof a given item works on that objective. Ground-target mode is experimental and requires in-game confirmation.
 
@@ -30,6 +32,7 @@ This plugin is a **research prototype**, not verified in-game. The Duty List fal
 
 ### Commands
 
+- `/qic debug [on|off|status]`: toggle optional diagnostic messages (quiet by default, persistent)
 - `/qic inspect`: print quest-event handlers, item hint IDs, Duty List shortcut item IDs, quest-linked key items and known/learned mappings
 - `/qic area`: list nearby circular quest-area markers and held quest-linked items
 - `/qic bind <itemId>`: learn a single selected target-to-item mapping, saving to the existing local routes file (disarms)
