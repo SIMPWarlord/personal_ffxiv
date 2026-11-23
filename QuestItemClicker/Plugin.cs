@@ -41,6 +41,11 @@ public sealed class Plugin : IDalamudPlugin
     private List<QuestItemRule> localRules = new();
     private List<QuestItemRule> rules = new();
     private nint lastTargetAddress;
+    // A target selected while mounted stays pending until dismount completes.
+    // We then try exactly once; we don't spam failed item actions each frame.
+    private nint pendingTargetAddress;
+    private bool queuedWhileMounted;
+    private DateTime dismountReadySince = DateTime.MinValue;
     private DateTime lastAction = DateTime.MinValue;
     private bool armed;
 
@@ -71,23 +76,30 @@ public sealed class Plugin : IDalamudPlugin
         if (action.Equals("arm", StringComparison.OrdinalIgnoreCase))
         {
             armed = true;
-            Say("ARMED. Selecting a matching objective can use a quest item. /qic off disables it.");
+            // Arming while a target is already selected should not require another click.
+            pendingTargetAddress = (nint)(targets.Target?.Address ?? IntPtr.Zero);
+            Say("ARMED. Selected targets can use quest items; mounted targets wait until dismount. /qic off disables it.");
         }
         else if (action.Equals("off", StringComparison.OrdinalIgnoreCase) ||
                  action.Equals("disarm", StringComparison.OrdinalIgnoreCase))
         {
             armed = false;
+            pendingTargetAddress = 0;
+            queuedWhileMounted = false;
+            dismountReadySince = DateTime.MinValue;
             Say("DISARMED (dry run): matches are reported but items are not used.");
         }
         else if (action.Equals("reload", StringComparison.OrdinalIgnoreCase))
         {
             armed = false;
+            pendingTargetAddress = 0;
             Load();
             Say($"Reloaded {rules.Count} mappings. DISARMED.");
         }
         else if (action.StartsWith("import ", StringComparison.OrdinalIgnoreCase))
         {
             armed = false;
+            pendingTargetAddress = 0;
             var root = action.Substring(7).Trim().Trim('"');
             try
             {
@@ -110,24 +122,98 @@ public sealed class Plugin : IDalamudPlugin
         else if (action.Equals("use", StringComparison.OrdinalIgnoreCase))
             TryObjective(targets.Target, allowPositionOnly: true);
         else if (action.Equals("status", StringComparison.OrdinalIgnoreCase))
-            Say($"{(armed ? "ARMED" : "DISARMED")}; native inspection ON; {rules.Count} legacy mappings; target BaseId {targets.Target?.BaseId.ToString() ?? "none"}; territory {client.TerritoryType}.");
+            Say($"{(armed ? "ARMED" : "DISARMED")}; native inspection ON; {rules.Count} mappings; " +
+                $"target BaseId {targets.Target?.BaseId.ToString() ?? "none"}; territory {client.TerritoryType}; " +
+                $"pending mounted selection: {queuedWhileMounted && pendingTargetAddress != 0}.");
         else
             Say("Commands: /qic inspect | /qic bind <itemId> | /qic forget | /qic arm | /qic off | /qic use | /qic status | /qic import \"path\" | /qic reload");
     }
 
+    private bool IsMountBlocked() =>
+        conditions[ConditionFlag.Mounted] ||
+        conditions[ConditionFlag.RidingPillion] ||
+        conditions[ConditionFlag.Mounting] ||
+        conditions[ConditionFlag.MountOrOrnamentTransition] ||
+        conditions[ConditionFlag.InFlight];
+
     private void OnUpdate(IFramework _)
     {
-        var address = (nint)(targets.Target?.Address ?? IntPtr.Zero);
-        if (address == lastTargetAddress) return;
-        lastTargetAddress = address;
-        if (address == 0 || !client.IsLoggedIn) return;
-        TryObjective(targets.Target, allowPositionOnly: false);
+        var target = targets.Target;
+        var address = (nint)(target?.Address ?? IntPtr.Zero);
+
+        if (address != lastTargetAddress)
+        {
+            // Changing or clearing the target cancels any old pending attempt.
+            lastTargetAddress = address;
+            pendingTargetAddress = address;
+            queuedWhileMounted = false;
+            dismountReadySince = DateTime.MinValue;
+        }
+
+        if (address == 0 || !client.IsLoggedIn)
+        {
+            pendingTargetAddress = 0;
+            queuedWhileMounted = false;
+            dismountReadySince = DateTime.MinValue;
+            return;
+        }
+        if (pendingTargetAddress != address) return;
+
+        if (IsMountBlocked())
+        {
+            // Do not attempt an item while mounted: the game can reject it,
+            // and previously we never retried without reselecting the target.
+            if (!queuedWhileMounted)
+            {
+                queuedWhileMounted = true;
+                dismountReadySince = DateTime.MinValue;
+                Say("Target selected while mounted. Will evaluate it after dismount; no need to reselect.");
+            }
+            return;
+        }
+
+        if (queuedWhileMounted)
+        {
+            // Give the client time to finish the dismount animation/state change.
+            if (dismountReadySince == DateTime.MinValue)
+                dismountReadySince = DateTime.UtcNow;
+            if ((DateTime.UtcNow - dismountReadySince).TotalMilliseconds < 650)
+                return;
+        }
+
+        if (conditions[ConditionFlag.BetweenAreas] ||
+            conditions[ConditionFlag.OccupiedInEvent] ||
+            conditions[ConditionFlag.OccupiedInQuestEvent] ||
+            conditions[ConditionFlag.OccupiedInCutSceneEvent])
+            return;
+
+        // Keep a pending target through the short item cooldown.
+        if ((DateTime.UtcNow - lastAction).TotalSeconds < 2)
+            return;
+
+        // Exactly one evaluation per selection/arm action. If the target changes,
+        // the old queued request cannot fire on a different object.
+        pendingTargetAddress = 0;
+        queuedWhileMounted = false;
+        dismountReadySince = DateTime.MinValue;
+        TryObjective(target, allowPositionOnly: false);
     }
 
     private unsafe void TryObjective(IGameObject? target, bool allowPositionOnly)
     {
         if (!client.IsLoggedIn || objects.LocalPlayer == null ||
             conditions[ConditionFlag.BetweenAreas] || conditions[ConditionFlag.OccupiedInEvent]) return;
+        if (IsMountBlocked())
+        {
+            if (target is not null)
+            {
+                pendingTargetAddress = (nint)target.Address;
+                queuedWhileMounted = true;
+                dismountReadySince = DateTime.MinValue;
+                Say("Cannot use an item while mounted. Keeping this target queued until dismount.");
+            }
+            return;
+        }
         if ((DateTime.UtcNow - lastAction).TotalSeconds < 2) return;
         var me = objects.LocalPlayer!;
         if (target is not null && TryNativeObjective(target)) return;

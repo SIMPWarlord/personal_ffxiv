@@ -1,13 +1,15 @@
 # Personal FFXIV plugins
 
-## Quest Item Clicker 0.2.2.0 - Duty List shortcut detection
+## Quest Item Clicker 0.2.3.0 - mounted-target retry
 
 This plugin is a **research prototype**, not verified in-game. The Duty List fallback checks the game's tracked quest `QuestTodoList.TrackedQuest.ItemIds` when a quest handler's `GetEventItemId()` is zero. It requires a tracked quest with a matching accepted quest handler and an unambiguous held item. The new mode still triggers on target selection, not actual mouse clicks. It uses client-side quest event handlers to look for an associated event item, checks whether the quest is accepted, and checks whether that item appears in your Key Items inventory. No external Questionable quest path database is required for native hints.
+
+**Mounted target behavior (0.2.3):** Select an objective while riding and dismount normally. The plugin keeps that selection pending and, after the mount transition has finished, evaluates it once without another click. It will not dismount you automatically and it will not repeatedly spam item-use attempts. `/qic off` cancels pending actions; `/qic arm` enables actual item-use attempts.
 
 **Limitations:** `EventHandler.GetEventItemId()` is an unverified hint and may return zero or an ID that is not actually usable on this target. Selecting a target is not a true mouse-click interaction; targets without quest handlers, multiple possible matches, quest state changes, and untargetable ground objectives may not work. The plugin does not brute-force items. Some item-use actions require special conditions not exposed by this detection. An optional older route importer remains for known mapped objectives.
 
 ### Testing safely
-1. Install from the existing custom Dalamud feed: https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/pluginmaster.json (currently published version: 0.2.0.0).
+1. Install from the existing custom Dalamud feed: https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/pluginmaster.json (published version may lag until a tested build is released).
 2. To test a new build before publication, use the successful GitHub Actions artifact in Dalamud developer plugin locations.
 3. Make sure the relevant quest is visible (tracked) on your Duty List. Select a quest NPC / enemy / targetable ground object.
 4. Type `/qic inspect` to print native quest handlers, Duty List item IDs, and held state. If the game's Duty List only shows a single valid quest item, deselect and reselect to check the dry-run output.
@@ -29,7 +31,7 @@ This plugin is a **research prototype**, not verified in-game. The Duty List fal
 
 ### Development and release
 
-Pushes to `QuestItemClicker/**` trigger the Windows GitHub Actions build workflow. A compiled test artifact is NOT an automatic public release. Only manually run the **Publish Quest Item Clicker (manual)** workflow after checking the build and testing it in FFXIV. **Current public release:** version 0.2.0.0 is available to Dalamud via `pluginmaster.json`, with its verified ZIP hosted under `dist/QuestItemClicker-v0.2.0.0/latest.zip` on the public repository. Future updates remain manual unless separately authorized.
+Pushes to `QuestItemClicker/**` trigger the Windows GitHub Actions build workflow. A compiled test artifact is NOT an automatic public release. Only manually run the **Publish Quest Item Clicker (manual)** workflow after checking the build and testing it in FFXIV. **Public release:** use the version in `pluginmaster.json`; release packages are hosted in versioned `dist/QuestItemClicker-v*/latest.zip` paths. Future updates remain manual unless separately authorized.
 
 Third-party plugins and gameplay automation are not officially supported by FFXIV and may violate the game's terms.
 
