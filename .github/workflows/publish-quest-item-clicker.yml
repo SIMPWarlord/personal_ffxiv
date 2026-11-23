@@ -6,7 +6,7 @@ on:
       run_id:
         description: 'Successful Quest Item Clicker test build run ID'
         required: true
-        default: '45108066933'
+        default: '45110118920'
       confirm:
         description: 'Publish this experimental build for installation (must be checked)'
         type: boolean
@@ -76,11 +76,10 @@ jobs:
           assert manifest["InternalName"] == "QuestItemClicker"
           assert isinstance(manifest["DalamudApiLevel"], int)
           tag = f"QuestItemClicker-v{version}"
-          if os.environ["GITHUB_EVENT_NAME"] == "push":
-              # The GitHub Actions token may not create releases on app-authored pushes.
-              url = f"https://raw.githubusercontent.com/{os.environ['GH_REPO']}/main/dist/{tag}/latest.zip"
-          else:
-              url = f"https://github.com/{os.environ['GH_REPO']}/releases/download/{tag}/latest.zip"
+          # Versioned ZIP files are served directly by the public repository.
+          # Github Actions is authorized to push commits here, but the
+          # release-creation REST endpoint is denied to this integration.
+          url = f"https://raw.githubusercontent.com/{os.environ['GH_REPO']}/main/dist/{tag}/latest.zip"
           feed_path = Path("pluginmaster.json")
           entries = json.loads(feed_path.read_text(encoding="utf-8-sig"))
           assert isinstance(entries, list)
@@ -107,8 +106,7 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"tag={tag}\nversion={version}\n")
           PY
-      - name: Stage public versioned ZIP (one-time push release)
-        if: ${{ github.event_name == 'push' }}
+      - name: Stage public versioned ZIP
         shell: bash
         run: |
           set -euo pipefail
@@ -120,25 +118,6 @@ jobs:
           else
             cp staged/latest.zip "$path"
           fi
-      - name: Publish versioned release
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        shell: bash
-        env:
-          TAG: ${{ steps.prepare.outputs.tag }}
-          VERSION: ${{ steps.prepare.outputs.version }}
-          BUILD_SHA: ${{ steps.verify.outputs.sha }}
-        run: |
-          set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            # Never replace a versioned binary; a rerun is only safe if bytes match.
-            mkdir existing
-            gh release download "$TAG" --pattern latest.zip --dir existing
-            cmp staged/latest.zip existing/latest.zip || { echo "Version already exists with different bytes; bump the plugin version."; exit 1; }
-          else
-            gh release create "$TAG" staged/latest.zip --target "$BUILD_SHA" --title "Quest Item Clicker $VERSION (experimental)" --notes "Experimental build; compiled but not verified in FFXIV. Native quest-item hints now work without importing Questionable quest-path data. Starts disarmed; /qic inspect and dry-run before /qic arm."
-          fi
-          curl --fail --location --silent --show-error "https://github.com/$GH_REPO/releases/download/$TAG/latest.zip" -o downloaded.zip
-          cmp staged/latest.zip downloaded.zip
       - name: Commit repository manifest
         shell: bash
         run: |
