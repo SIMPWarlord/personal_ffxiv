@@ -1,11 +1,6 @@
 name: Publish Quest Item Clicker (manual)
 
 on:
-  # One-time push trigger for the user-requested v0.2 publication.
-  push:
-    branches: [main]
-    paths:
-      - '.release-triggers/quest-item-clicker-v0.2.0.0'
   workflow_dispatch:
     inputs:
       run_id:
@@ -28,12 +23,12 @@ concurrency:
 
 jobs:
   publish:
-    if: ${{ github.ref == 'refs/heads/main' && ((github.event_name == 'workflow_dispatch' && inputs.confirm) || github.event_name == 'push') }}
+    if: ${{ inputs.confirm && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      RUN_ID: ${{ github.event_name == 'push' && '45108066933' || inputs.run_id }}
+      RUN_ID: ${{ inputs.run_id }}
     steps:
       - uses: actions/checkout@v5
         with:
