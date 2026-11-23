@@ -3,7 +3,7 @@
     "Author": "SIMPWarlord",
     "Name": "Quest Item Clicker",
     "InternalName": "QuestItemClicker",
-    "AssemblyVersion": "0.2.3.0",
+    "AssemblyVersion": "0.2.4.0",
     "Description": "Experimental native and Duty List item matching for selected quest objectives.",
     "ApplicableVersion": "any",
     "RepoUrl": "https://github.com/SIMPWarlord/personal_ffxiv",
@@ -17,13 +17,13 @@
     "CanUnloadAsync": false,
     "LoadPriority": 0,
     "Punchline": "Experimental quest item helper; starts in dry-run mode.",
-    "Changelog": "Queue targets selected while mounted and attempt once after dismount without reselecting.",
+    "Changelog": "Add quest-linked Key Item fallback for unknown objectives when event and Duty List hints are absent.",
     "AcceptsFeedback": true,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "DownloadLinkInstall": "https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/dist/QuestItemClicker-v0.2.3.0/latest.zip",
-    "DownloadLinkUpdate": "https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/dist/QuestItemClicker-v0.2.3.0/latest.zip",
-    "DownloadLinkTesting": "https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/dist/QuestItemClicker-v0.2.3.0/latest.zip",
-    "LastUpdate": "1795408369"
+    "DownloadLinkInstall": "https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/dist/QuestItemClicker-v0.2.4.0/latest.zip",
+    "DownloadLinkUpdate": "https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/dist/QuestItemClicker-v0.2.4.0/latest.zip",
+    "DownloadLinkTesting": "https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/dist/QuestItemClicker-v0.2.4.0/latest.zip",
+    "LastUpdate": "1795408558"
   }
 ]
