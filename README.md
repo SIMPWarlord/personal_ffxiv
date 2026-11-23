@@ -7,7 +7,7 @@ This plugin is a **research prototype**, not verified in-game. It uses client-si
 **Limitations:** `EventHandler.GetEventItemId()` is an unverified hint and may return zero or an ID that is not actually usable on this target. Selecting a target is not a true mouse-click interaction; targets without quest handlers, multiple possible matches, quest state changes, and untargetable ground objectives may not work. The plugin does not brute-force items. Some item-use actions require special conditions not exposed by this detection. An optional older route importer remains for known mapped objectives.
 
 ### Testing safely
-1. Install from the existing custom Dalamud feed: https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/pluginmaster.json (currently published version stays 0.1 until manually publishing 0.2).
+1. Install from the existing custom Dalamud feed: https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/pluginmaster.json (currently published version: 0.2.0.0).
 2. To test a new build before publication, use the successful GitHub Actions artifact in Dalamud developer plugin locations.
 3. Select a quest NPC / enemy / ground object.
 4. Type `/qic inspect` to print native quest handlers and associated EventItemId values.
@@ -26,6 +26,6 @@ This plugin is a **research prototype**, not verified in-game. It uses client-si
 
 ### Development and release
 
-Pushes to `QuestItemClicker/**` trigger the Windows GitHub Actions build workflow. A compiled test artifact is NOT an automatic public release. Only manually run the **Publish Quest Item Clicker (manual)** workflow after checking the build and testing it in FFXIV. The public `pluginmaster.json` continues to target the last published version until then.
+Pushes to `QuestItemClicker/**` trigger the Windows GitHub Actions build workflow. A compiled test artifact is NOT an automatic public release. Only manually run the **Publish Quest Item Clicker (manual)** workflow after checking the build and testing it in FFXIV. **Published:** version 0.2.0.0 is available to Dalamud via `pluginmaster.json`, with its verified ZIP hosted under `dist/QuestItemClicker-v0.2.0.0/latest.zip` on the public repository. Future updates remain manual unless separately authorized.
 
 Third-party plugins and gameplay automation are not officially supported by FFXIV and may violate the game's terms.
