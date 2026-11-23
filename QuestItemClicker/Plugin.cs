@@ -153,7 +153,7 @@ public sealed class Plugin : IDalamudPlugin
 
     // Native data is a hint, not definitive proof that an item works on this objective.
     // Never brute-force items. Only a unique, accepted-quest handler + owned item can proceed.
-    private bool TryNativeObjective(IGameObject target)
+    private unsafe bool TryNativeObjective(IGameObject target)
     {
         var hints = NativeQuestInspector.Inspect(target, inventory);
         var candidates = hints.Where(h => h.Accepted && h.Owned && h.EventItemId != 0)
