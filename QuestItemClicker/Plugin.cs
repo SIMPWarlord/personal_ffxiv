@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Text.Json;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Inventory;
 using Dalamud.Game.ClientState.Objects.Types;
@@ -29,6 +30,14 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ICommandManager commands;
     private readonly ICondition conditions;
     private readonly IGameInventory inventory;
+    private readonly IGameGui gameGui;
+    private readonly IDalamudPluginInterface pluginInterface;
+    private Vector2 clickedScreen;
+    private bool clickPending;
+    private GroundPending? groundPending;
+    private DateTime groundDismountReady = DateTime.MinValue;
+    private readonly record struct GroundPending(ushort QuestId, uint ItemId, uint TerritoryId,
+        Vector3 Position, DateTime CreatedUtc);
     private readonly string rulePath;
     private static readonly QuestItemRule[] ConfirmedExampleRules =
     [
@@ -51,7 +60,7 @@ public sealed class Plugin : IDalamudPlugin
 
     public Plugin(IDalamudPluginInterface pluginInterface, IFramework framework,
         ITargetManager targets, IObjectTable objects, IClientState client,
-        IChatGui chat, ICommandManager commands, ICondition conditions, IGameInventory inventory)
+        IChatGui chat, ICommandManager commands, ICondition conditions, IGameInventory inventory, IGameGui gameGui)
     {
         this.framework = framework;
         this.targets = targets;
@@ -61,12 +70,15 @@ public sealed class Plugin : IDalamudPlugin
         this.commands = commands;
         this.conditions = conditions;
         this.inventory = inventory;
+        this.gameGui = gameGui;
+        this.pluginInterface = pluginInterface;
         rulePath = Path.Combine(pluginInterface.GetPluginConfigDirectory(), "routes.json");
         Load();
         commands.AddHandler(Command, new CommandInfo(OnCommand) {
             HelpMessage = "Quest item clicker: /qic help. Starts DISARMED (dry run)."
         });
         framework.Update += OnUpdate;
+        pluginInterface.UiBuilder.Draw += OnDraw;
         Say($"Native inspection enabled; {rules.Count} known + local mappings. DISARMED (dry run). Try /qic inspect on a quest target.");
     }
 
@@ -87,6 +99,9 @@ public sealed class Plugin : IDalamudPlugin
             pendingTargetAddress = 0;
             queuedWhileMounted = false;
             dismountReadySince = DateTime.MinValue;
+            groundPending = null;
+            clickPending = false;
+            groundDismountReady = DateTime.MinValue;
             Say("DISARMED (dry run): matches are reported but items are not used.");
         }
         else if (action.Equals("reload", StringComparison.OrdinalIgnoreCase))
@@ -115,6 +130,8 @@ public sealed class Plugin : IDalamudPlugin
         }
         else if (action.Equals("inspect", StringComparison.OrdinalIgnoreCase))
             InspectTarget();
+        else if (action.Equals("area", StringComparison.OrdinalIgnoreCase))
+            InspectNearbyAreas();
         else if (action.StartsWith("bind ", StringComparison.OrdinalIgnoreCase))
             BindTarget(action.Substring(5).Trim());
         else if (action.Equals("forget", StringComparison.OrdinalIgnoreCase))
@@ -126,7 +143,7 @@ public sealed class Plugin : IDalamudPlugin
                 $"target BaseId {targets.Target?.BaseId.ToString() ?? "none"}; territory {client.TerritoryType}; " +
                 $"pending mounted selection: {queuedWhileMounted && pendingTargetAddress != 0}.");
         else
-            Say("Commands: /qic inspect | /qic bind <itemId> | /qic forget | /qic arm | /qic off | /qic use | /qic status | /qic import \"path\" | /qic reload");
+            Say("Commands: /qic inspect | /qic area | /qic bind <itemId> | /qic forget | /qic arm | /qic off | /qic use | /qic status | /qic import \"path\" | /qic reload");
     }
 
     private bool IsMountBlocked() =>
@@ -136,8 +153,19 @@ public sealed class Plugin : IDalamudPlugin
         conditions[ConditionFlag.MountOrOrnamentTransition] ||
         conditions[ConditionFlag.InFlight];
 
+    private void OnDraw()
+    {
+        if (!ImGui.IsMouseClicked(ImGuiMouseButton.Left) || ImGui.GetIO().WantCaptureMouse) return;
+        var cursor = ImGui.GetMousePos();
+        if (!float.IsFinite(cursor.X) || !float.IsFinite(cursor.Y)) return;
+        clickedScreen = cursor;
+        clickPending = true;
+    }
+
     private void OnUpdate(IFramework _)
     {
+        ProcessGroundClick();
+        ProcessQueuedGround();
         var target = targets.Target;
         var address = (nint)(target?.Address ?? IntPtr.Zero);
 
@@ -374,6 +402,134 @@ public sealed class Plugin : IDalamudPlugin
         return false;
     }
 
+
+    // Only evaluate an actual game-world click near a game-owned, accepted-quest
+    // area marker. A quest's item association is a hint, not a compatibility proof.
+    private void ProcessGroundClick()
+    {
+        if (!clickPending) return;
+        clickPending = false;
+        if (!client.IsLoggedIn || client.IsPvP || objects.LocalPlayer == null ||
+            conditions[ConditionFlag.BetweenAreas] || conditions[ConditionFlag.OccupiedInEvent] ||
+            conditions[ConditionFlag.OccupiedInQuestEvent] ||
+            conditions[ConditionFlag.OccupiedInCutSceneEvent]) return;
+
+        // Ordinary object clicks still use the established target-selection path.
+        if (targets.MouseOverTarget != null || targets.MouseOverNameplateTarget != null) return;
+        if (!gameGui.ScreenToWorld(clickedScreen, out var point, 1000f)) return;
+        if (Vector3.Distance(objects.LocalPlayer.Position, point) > 25f) return;
+        var areas = QuestAreaInspector.FindAt((ushort)client.TerritoryType, point);
+        if (areas.Count == 0) return;
+        var acceptedQuests = areas.Select(a => a.QuestId).Distinct().ToArray();
+        if (acceptedQuests.Length != 1)
+        {
+            Say($"GROUND: {acceptedQuests.Length} quests overlap here. Skipped.");
+            return;
+        }
+        var questId = acceptedQuests[0];
+        var linked = NativeQuestInspector.GetQuestLinkedKeyItems(questId)
+            .Where(HasKeyItem).Distinct().ToArray();
+        var duty = DutyListInspector.GetItemIds(questId)
+            .Where(HasKeyItem).Distinct().ToArray();
+        var ids = linked.Length != 0 ? linked : duty;
+        if (ids.Length != 1)
+        {
+            Say(ids.Length == 0
+                ? $"GROUND: quest {questId} area found, but no held quest-linked item."
+                : $"GROUND: quest {questId} has {ids.Length} candidate items; skipped.");
+            return;
+        }
+        var itemId = ids[0];
+        if (!armed)
+        {
+            Say($"GROUND DRY RUN: quest {questId}, item {itemId}, clicked " +
+                $"({point.X:F1}, {point.Y:F1}, {point.Z:F1}). " +
+                "Association does not prove the objective accepts it. /qic arm to try.");
+            return;
+        }
+        if (IsMountBlocked())
+        {
+            groundPending = new GroundPending(questId, itemId, client.TerritoryType, point, DateTime.UtcNow);
+            groundDismountReady = DateTime.MinValue;
+            Say($"GROUND: queued quest {questId}, item {itemId} until dismount.");
+            return;
+        }
+        UseGroundItem(questId, itemId, point);
+    }
+
+    private void ProcessQueuedGround()
+    {
+        if (groundPending is not { } pending) return;
+        if (!armed || !client.IsLoggedIn || client.IsPvP || objects.LocalPlayer == null ||
+            client.TerritoryType != pending.TerritoryId ||
+            (DateTime.UtcNow - pending.CreatedUtc).TotalSeconds > 15 ||
+            Vector3.Distance(objects.LocalPlayer.Position, pending.Position) > 25f)
+        {
+            groundPending = null;
+            groundDismountReady = DateTime.MinValue;
+            return;
+        }
+        if (IsMountBlocked())
+        {
+            groundDismountReady = DateTime.MinValue;
+            return;
+        }
+        if (groundDismountReady == DateTime.MinValue) groundDismountReady = DateTime.UtcNow;
+        if ((DateTime.UtcNow - groundDismountReady).TotalMilliseconds < 650 ||
+            conditions[ConditionFlag.OccupiedInEvent] ||
+            conditions[ConditionFlag.OccupiedInQuestEvent] ||
+            conditions[ConditionFlag.OccupiedInCutSceneEvent] ||
+            (DateTime.UtcNow - lastAction).TotalSeconds < 2) return;
+        groundPending = null;
+        groundDismountReady = DateTime.MinValue;
+        var matches = QuestAreaInspector.FindAt((ushort)client.TerritoryType, pending.Position);
+        if (matches.Select(m => m.QuestId).Distinct().Count() != 1 ||
+            matches.All(m => m.QuestId != pending.QuestId) ||
+            !HasKeyItem(pending.ItemId))
+        {
+            Say("GROUND: queued area/item no longer matches; cancelled.");
+            return;
+        }
+        UseGroundItem(pending.QuestId, pending.ItemId, pending.Position);
+    }
+
+    private unsafe void UseGroundItem(ushort questId, uint itemId, Vector3 point)
+    {
+        if (!armed || IsMountBlocked() || client.IsPvP || !HasKeyItem(itemId) ||
+            conditions[ConditionFlag.BetweenAreas] ||
+            (DateTime.UtcNow - lastAction).TotalSeconds < 2) return;
+        var manager = ActionManager.Instance();
+        if (manager == null) { Say("GROUND: ActionManager unavailable."); return; }
+        var pos = point;
+        var success = manager->UseActionLocation(ActionType.EventItem, itemId, location: &pos);
+        lastAction = DateTime.UtcNow;
+        Say($"GROUND: quest {questId}, item {itemId}, UseActionLocation returned {success}. " +
+            "The game determines whether it advances the quest.");
+    }
+
+    private void InspectNearbyAreas()
+    {
+        if (!client.IsLoggedIn || objects.LocalPlayer == null)
+        {
+            Say("GROUND: select a quest area and log in first."); return;
+        }
+        var areas = QuestAreaInspector.Nearby((ushort)client.TerritoryType,
+            objects.LocalPlayer.Position, 50f);
+        if (areas.Count == 0)
+        {
+            Say("GROUND: no accepted quest area marker within 50 yalms."); return;
+        }
+        foreach (var m in areas.Take(6))
+        {
+            var ids = NativeQuestInspector.GetQuestLinkedKeyItems(m.QuestId)
+                .Where(HasKeyItem).Distinct().ToArray();
+            Say($"GROUND AREA quest {m.QuestId}: " +
+                $"({m.Center.X:F1}, {m.Center.Y:F1}, {m.Center.Z:F1}), " +
+                $"radius {m.Radius:F1}, items [{string.Join(",", ids)}].");
+        }
+        if (areas.Count > 6) Say($"GROUND: showing 6/{areas.Count} markers.");
+    }
+
     private bool HasKeyItem(uint itemId)
     {
         foreach (var item in inventory.GetInventoryItems(GameInventoryType.KeyItems))
@@ -446,6 +602,7 @@ public sealed class Plugin : IDalamudPlugin
     public void Dispose()
     {
         framework.Update -= OnUpdate;
+        pluginInterface.UiBuilder.Draw -= OnDraw;
         commands.RemoveHandler(Command);
     }
 }
