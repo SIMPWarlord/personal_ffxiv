@@ -3,7 +3,7 @@
     "Author": "SIMPWarlord",
     "Name": "Quest Item Clicker",
     "InternalName": "QuestItemClicker",
-    "AssemblyVersion": "0.2.5.0",
+    "AssemblyVersion": "0.2.6.0",
     "Description": "Experimental native and Duty List item matching for selected quest objectives.",
     "ApplicableVersion": "any",
     "RepoUrl": "https://github.com/SIMPWarlord/personal_ffxiv",
@@ -17,13 +17,13 @@
     "CanUnloadAsync": false,
     "LoadPriority": 0,
     "Punchline": "Experimental quest item helper; starts in dry-run mode.",
-    "Changelog": "Experimental ground-click quest area detection and ground-target event item actions.",
+    "Changelog": "Optional persistent debug chat mode; routine quest-item and AoE diagnostics silent by default.",
     "AcceptsFeedback": true,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "DownloadLinkInstall": "https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/dist/QuestItemClicker-v0.2.5.0/latest.zip",
-    "DownloadLinkUpdate": "https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/dist/QuestItemClicker-v0.2.5.0/latest.zip",
-    "DownloadLinkTesting": "https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/dist/QuestItemClicker-v0.2.5.0/latest.zip",
-    "LastUpdate": "1795410570"
+    "DownloadLinkInstall": "https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/dist/QuestItemClicker-v0.2.6.0/latest.zip",
+    "DownloadLinkUpdate": "https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/dist/QuestItemClicker-v0.2.6.0/latest.zip",
+    "DownloadLinkTesting": "https://raw.githubusercontent.com/SIMPWarlord/personal_ffxiv/main/dist/QuestItemClicker-v0.2.6.0/latest.zip",
+    "LastUpdate": "1795470483"
   }
 ]
