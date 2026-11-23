@@ -1,12 +1,17 @@
 name: Publish Quest Item Clicker (manual)
 
 on:
+  # One-time publication trigger for verified 0.2.6.0 debug-mode release.
+  push:
+    branches: [main]
+    paths:
+      - '.release-triggers/quest-item-clicker-v0.2.6.0'
   workflow_dispatch:
     inputs:
       run_id:
         description: 'Successful Quest Item Clicker test build run ID'
         required: true
-        default: '45115873267'
+        default: '45273131149'
       confirm:
         description: 'Publish this experimental build for installation (must be checked)'
         type: boolean
@@ -23,12 +28,12 @@ concurrency:
 
 jobs:
   publish:
-    if: ${{ inputs.confirm && github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.confirm)) }}
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      RUN_ID: ${{ inputs.run_id }}
+      RUN_ID: ${{ github.event_name == 'push' && '45273131149' || inputs.run_id }}
     steps:
       - uses: actions/checkout@v5
         with:
